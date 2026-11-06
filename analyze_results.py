@@ -117,6 +117,32 @@ def main():
                         meta_all["config"]["alpha"] == 0.5,
                         "%s/%s" % (meta_all["config"]["T"], meta_all["config"]["alpha"])))
 
+    # ---------- 补充种子复测（seed 1/2，教师仍为 seed 0 的正式教师） ----------
+    seed_rows = []
+    for sd in (1, 2):
+        p = RESULTS / ("seed%d" % sd) / "results_all.json"
+        if p.exists():
+            r = load(p)
+            a, b = r["scratch"], r["kd"]
+            gap = 100 * (a["val_loss"] - b["val_loss"]) / a["val_loss"]
+            seed_rows.append({"seed": sd, "scratch_loss": a["val_loss"],
+                              "kd_loss": b["val_loss"], "gain_pct": gap,
+                              "scratch_agree": a["agree"], "kd_agree": b["agree"]})
+            checks.append(check("seed%d_kd_better" % sd,
+                                b["val_loss"] < a["val_loss"],
+                                "%.4f < %.4f" % (b["val_loss"], a["val_loss"])))
+    if seed_rows:
+        gains = [all_res["comparison"]["relative_drop_pct"]] + [r["gain_pct"] for r in seed_rows]
+        import statistics
+        summary["supplementary_seeds"] = {
+            "rows": seed_rows,
+            "n": len(gains),
+            "mean_gain_pct": statistics.mean(gains),
+            "std_gain_pct": statistics.stdev(gains) if len(gains) > 1 else 0.0,
+            "min_gain_pct": min(gains),
+            "max_gain_pct": max(gains),
+        }
+
     # ---------- 消融 ----------
     abl_res = load(RESULTS / "ablate" / "results_ablate.json")
     abl = abl_res["ablation"]
@@ -275,6 +301,11 @@ def main():
         print("教师规模扫描：" + " | ".join(
             "C=%d gain=%.2f%%" % (r["teacher_embd"], r["relative_drop_pct"])
             for r in summary["scan"]["rows"]))
+    if "supplementary_seeds" in summary:
+        ss = summary["supplementary_seeds"]
+        print("补充种子：n=%d, 平均下降 %.2f%%，标准差 %.2f pp（min %.2f%%，max %.2f%%）"
+              % (ss["n"], ss["mean_gain_pct"], ss["std_gain_pct"],
+                 ss["min_gain_pct"], ss["max_gain_pct"]))
     print("=" * 78)
 
     if args.check:
@@ -314,6 +345,18 @@ def main():
             lines.append("| %d | " % T + " | ".join("%.4f" % v for v in vals) + " |")
         lines += ["", "120 步最优：T=%d，α=%.1f，val=%.4f。" %
                   (a120["best"]["T"], a120["best"]["alpha"], a120["best"]["val_loss"])]
+    if "supplementary_seeds" in summary:
+        ss = summary["supplementary_seeds"]
+        lines += ["", "## 补充种子复测（教师固定为 seed 0 的正式教师）", "",
+                  "| seed | 从零 loss | 蒸馏 loss | 相对下降 |", "|---:|---:|---:|---:|",
+                  "| 0 | %.4f | %.4f | %.2f%% |" %
+                  (scratch["val_loss"], kd["val_loss"],
+                   summary["comparison"]["relative_drop_pct"])]
+        for r in ss["rows"]:
+            lines.append("| %d | %.4f | %.4f | %.2f%% |" %
+                         (r["seed"], r["scratch_loss"], r["kd_loss"], r["gain_pct"]))
+        lines += ["", "n=%d，平均相对下降 %.2f%%，样本标准差 %.2f 个百分点。" %
+                  (ss["n"], ss["mean_gain_pct"], ss["std_gain_pct"])]
     lines += ["", "## 核验", ""]
     for c in checks:
         lines.append("- [%s] %s：%s" % ("x" if c["pass"] else " ", c["name"], c["detail"]))

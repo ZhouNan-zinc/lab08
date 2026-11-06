@@ -801,8 +801,8 @@ def run_all(args, out_dir):
            "samples": samples, "env": env_snapshot()}
     save_json(res, out_dir / "results_all.json")
     plot_curves(res, out_dir / "curves.png")
-    # 正式运行的图复制到公共图目录，供报告引用；quick 不污染正式图
-    if args.mode == "all":
+    # 正式运行的图复制到公共图目录，供报告引用；quick/自定义目录不污染正式图
+    if args.mode == "all" and out_dir == DEFAULT_DIRS["all"]:
         figs = RESULTS / "figures"
         figs.mkdir(parents=True, exist_ok=True)
         shutil.copy2(out_dir / "curves.png", figs / "curves.png")
